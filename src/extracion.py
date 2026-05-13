@@ -33,10 +33,16 @@ def bronze():
         json.dump(all_clips, f, ensure_ascii=False, indent=2)
     logger.info(f"Bronze stage complete: {len(all_clips)} total clips saved to data/bronze.json.")
 
+def silver():
+   df = pd.read_json("data/bronze.json") 
+   df_sorted = df.sort_values(by='view_count')
+
+   print(df_sorted.head())
 
 medallion = [bronze]
 
 
 if __name__ == "__main__":
-    for stage in medallion:
-        stage()
+    #for stage in medallion:
+    #    stage()
+    silver()
