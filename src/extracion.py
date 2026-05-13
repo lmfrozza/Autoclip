@@ -8,7 +8,10 @@ import pandas as pd
 
 def bronze():
     logger.info("Starting bronze stage...")
-    os.remove("data/bronze.json")
+    try:
+        os.remove("data/bronze.json")
+    except:
+        logger.info("No bronze table founded")
     load_dotenv()
     controller = TwitchController(
         client_id=os.getenv("TWITCH_CLIENT_ID"),
@@ -35,8 +38,10 @@ def bronze():
 
 def silver():
     logger.info("Starting silver stage...")
-    os.remove("data/silver.json")
-
+    try:
+        os.remove("data/silver.json")
+    except:
+        logger.info("No silver table founded")
     df = pd.read_json("data/bronze.json")
     logger.info(f"Loaded {len(df)} clips from bronze.")
 
@@ -64,10 +69,31 @@ def silver():
     df.to_json("data/silver.json", orient="records", force_ascii=False, indent=2, date_format="iso")
     logger.info(f"Silver stage complete: {len(df)} clips saved to data/silver.json.")
 
-medallion = [bronze, silver]
+def gold():
+    logger.info("Starting gold stage...")
+    try:
+        os.remove("data/gold.json")
+    except:
+        logger.info("No gold table founded")
 
+    df = pd.read_json("data/silver.json")
+    logger.info(f"Loaded {len(df)} clips from silver.")
+
+    # REMOVE SHORT VIDEOS
+    logger.info(f'Removing {len(df[df['duration']<15])} that are too short!')
+    df = df[df['duration']>=15]
+
+    # REMOVE LONG VIDEOS
+    logger.info(f'Removing {len(df[df['duration']>60])} that are too long!')
+    df = df[df['duration']<=60]
+
+    logger.info(f'{len(df)} videos are in between the "sweet spot"!')
+    df_sorted = df.sort_values(by='view_count', ascending=False)
+    print(df_sorted.head())
+
+medallion = [bronze, silver,gold]
 
 if __name__ == "__main__":
-    for stage in medallion:
-        stage()
-    silver()
+    #for stage in medallion:
+    #    stage()
+    gold()
