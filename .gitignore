@@ -1,4 +1,10 @@
+# Sec things:
 .env
+
+# StorageS:
 data/
-src/controllers/__pycache__
 logs/
+
+#py bs
+src/controllers/__pycache__
+src/__pycache__
