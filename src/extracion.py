@@ -34,15 +34,40 @@ def bronze():
     logger.info(f"Bronze stage complete: {len(all_clips)} total clips saved to data/bronze.json.")
 
 def silver():
-   df = pd.read_json("data/bronze.json") 
-   df_sorted = df.sort_values(by='view_count')
+    logger.info("Starting silver stage...")
+    os.remove("data/silver.json")
 
-   print(df_sorted.head())
+    df = pd.read_json("data/bronze.json")
+    logger.info(f"Loaded {len(df)} clips from bronze.")
 
-medallion = [bronze]
+    # --- Limpeza ---
+    before = len(df)
+    df = df.drop_duplicates(subset="id")
+    df = df[df["view_count"] > 0]
+    df["game_id"] = df["game_id"].replace("", None)
+    logger.info(f"Removed {before - len(df)} rows (duplicates + zero views).")
+
+    # --- Tipagem ---
+    df["created_at"] = pd.to_datetime(df["created_at"], utc=True)
+    df["duration"] = df["duration"].astype(float)
+
+    # --- Enriquecimento ---
+    now = pd.Timestamp.now(tz="UTC")
+    df["created_date"] = df["created_at"].dt.date
+    df["created_hour"] = df["created_at"].dt.hour
+    df["clip_age_days"] = (now - df["created_at"]).dt.days
+
+    # --- Remover colunas desnecessárias ---
+    df = df.drop(columns=["embed_url", "thumbnail_url", "vod_offset"])
+
+    os.makedirs("data", exist_ok=True)
+    df.to_json("data/silver.json", orient="records", force_ascii=False, indent=2, date_format="iso")
+    logger.info(f"Silver stage complete: {len(df)} clips saved to data/silver.json.")
+
+medallion = [bronze, silver]
 
 
 if __name__ == "__main__":
-    #for stage in medallion:
-    #    stage()
+    for stage in medallion:
+        stage()
     silver()
