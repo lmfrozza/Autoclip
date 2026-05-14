@@ -62,6 +62,14 @@ def silver():
     df["created_hour"] = df["created_at"].dt.hour
     df["clip_age_days"] = (now - df["created_at"]).dt.days
 
+    # --- SCORING AND RATING ---
+    df["clip_age_days"] = df["clip_age_days"].replace(0, 1)  # avoid division by zero
+    df["view_velocity"] = df["view_count"] / df["clip_age_days"]
+    df["duration_weight"] = df["duration"].apply(lambda d: 1.0 if 15 <= d <= 60 else 0.5)
+    df["featured_boost"] = df["is_featured"].apply(lambda f: 1.5 if f else 1.0)
+    df["score"] = df["view_velocity"] * df["duration_weight"] * df["featured_boost"]
+
+
     # --- Remover colunas desnecessárias ---
     df = df.drop(columns=["embed_url", "thumbnail_url", "vod_offset"])
 
@@ -79,21 +87,23 @@ def gold():
     df = pd.read_json("data/silver.json")
     logger.info(f"Loaded {len(df)} clips from silver.")
 
-    # REMOVE SHORT VIDEOS
-    logger.info(f'Removing {len(df[df['duration']<15])} that are too short!')
-    df = df[df['duration']>=15]
+    # --- Filtro de duração (sweet spot) ---
+    logger.info(f"Removing {len(df[df['duration'] < 15])} clips that are too short (< 15s).")
+    logger.info(f"Removing {len(df[df['duration'] > 60])} clips that are too long (> 60s).")
+    df = df[(df["duration"] >= 15) & (df["duration"] <= 60)]
+    logger.info(f"{len(df)} clips remaining in the sweet spot (15s–60s).")
 
-    # REMOVE LONG VIDEOS
-    logger.info(f'Removing {len(df[df['duration']>60])} that are too long!')
-    df = df[df['duration']<=60]
+    # --- Ordenar por score ---
+    df = df.sort_values(by="score", ascending=False).reset_index(drop=True)
+    df["rank"] = df.index + 1
 
-    logger.info(f'{len(df)} videos are in between the "sweet spot"!')
-    df_sorted = df.sort_values(by='view_count', ascending=False)
-    print(df_sorted.head())
+    os.makedirs("data", exist_ok=True)
+    df.to_json("data/gold.json", orient="records", force_ascii=False, indent=2, date_format="iso")
+    logger.info(f"Gold stage complete: {len(df)} clips saved to data/gold.json.")
+    logger.info(f"Top clip: '{df.iloc[0]['title']}' by {df.iloc[0]['broadcaster_name']} (score={df.iloc[0]['score']:.2f})")
 
 medallion = [bronze, silver,gold]
 
 if __name__ == "__main__":
-    #for stage in medallion:
-    #    stage()
-    gold()
+    for stage in medallion:
+        stage()
