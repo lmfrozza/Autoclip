@@ -1,5 +1,5 @@
 from twitch_package.client import TwitchClient
-from config import logger
+from config import logger, streamers, pipeline
 import os
 import json
 from dotenv import load_dotenv
@@ -17,17 +17,15 @@ def bronze():
         client_id=os.getenv("TWITCH_CLIENT_ID"),
         client_secret=os.getenv("TWITCH_CLIENT_SECRET")
     )
-
-    with open("data/streamers.txt", "r") as f:
-        streamers = [line.strip() for line in f if line.strip()]
-    logger.info(f"{len(streamers)} streamers loaded.")
+    streamers_list = streamers
+    logger.info(f"{len(streamers_list)} streamers loaded.")
 
     all_clips = []
 
-    for streamer in streamers:
+    for streamer in streamers_list:
         logger.debug(f"Fetching clips for '{streamer}'...")
         response = client.get_streamer_by_login(streamer=streamer)
-        clips = client.get_clips(streamer_id=response[0]["id"], range=5)
+        clips = client.get_clips(streamer_id=response[0]["id"], range=pipeline.get("range_days", 5))
         all_clips.extend(clips)
         logger.info(f"[{streamer}] {len(clips)} clips fetched.")
 
