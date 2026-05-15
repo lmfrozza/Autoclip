@@ -6,3 +6,4 @@ streamers:
 
 pipeline:
   range_days: 1
+  download_cap: 2
