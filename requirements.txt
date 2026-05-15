@@ -9,4 +9,5 @@ python-dateutil==2.9.0.post0
 python-dotenv==1.2.2
 requests==2.34.0
 six==1.17.0
+twitch-package @ git+https://github.com/lmfrozza/twitch-package.git@7539cb2b0f79b83196a5ac597b64e2b58572e172
 urllib3==2.7.0

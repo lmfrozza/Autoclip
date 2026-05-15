@@ -1,4 +1,4 @@
-from controllers.twitch import TwitchController
+from twitch_package.client import TwitchClient
 from config import logger
 import os
 import json
@@ -13,7 +13,7 @@ def bronze():
     except:
         logger.info("No bronze table founded")
     load_dotenv()
-    controller = TwitchController(
+    client = TwitchClient(
         client_id=os.getenv("TWITCH_CLIENT_ID"),
         client_secret=os.getenv("TWITCH_CLIENT_SECRET")
     )
@@ -26,8 +26,8 @@ def bronze():
 
     for streamer in streamers:
         logger.debug(f"Fetching clips for '{streamer}'...")
-        response = controller.get_streamer_by_login(streamer=streamer)
-        clips = controller.get_clips(streamer_id=response[0]["id"], range=5)
+        response = client.get_streamer_by_login(streamer=streamer)
+        clips = client.get_clips(streamer_id=response[0]["id"], range=5)
         all_clips.extend(clips)
         logger.info(f"[{streamer}] {len(clips)} clips fetched.")
 
