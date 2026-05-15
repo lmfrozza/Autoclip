@@ -1,0 +1,8 @@
+streamers:
+  - cellbit
+  - gaules
+  - coringa
+  - razah
+
+pipeline:
+  range_days: 1
