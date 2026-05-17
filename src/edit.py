@@ -102,18 +102,24 @@ def _seconds_to_ass_time(t: float) -> str:
 # ASS subtitle generation with karaoke effect
 # ---------------------------------------------------------------------------
 
+# How many words to show per "phrase window" in the karaoke display.
+# Words are grouped into windows of this size. Within each window:
+#   - words already spoken → white
+#   - current word         → yellow
+#   - upcoming words       → light gray
+KARAOKE_WINDOW = 5
+
+
 def _build_ass(subtitles: list[dict]) -> str:
     """
-    Build an ASS subtitle file with word-level karaoke coloring.
+    Build an ASS subtitle file from word-level SRT entries.
 
-    Strategy per subtitle line:
-      - Words already spoken: COLOR_SPOKEN
-      - Current word: COLOR_CURRENT  (highlighted via \\c color override)
-      - Upcoming words: COLOR_UPCOMING
+    Each subtitle entry is a single word with exact start/end timestamps
+    (produced by faster-whisper word_timestamps=True).
 
-    We emit one ASS Dialogue line per subtitle entry.
-    Inside each line we use inline color overrides (\\c) per word,
-    and \\k tags to drive timing so the highlight advances word by word.
+    Words are grouped into sliding windows of KARAOKE_WINDOW words so the
+    viewer always sees context around the current word. Within each window
+    the current word is yellow, spoken words are white, upcoming are gray.
     """
     ass_header = f"""\
 [Script Info]
@@ -129,74 +135,38 @@ Style: Default,{FONT_NAME},{FONT_SIZE},{COLOR_UPCOMING},{COLOR_CURRENT},{OUTLINE
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
+    if not subtitles:
+        return ass_header
+
     lines = []
+    total = len(subtitles)
 
-    for sub in subtitles:
-        words = sub["text"].split()
-        if not words:
-            continue
+    for i, word_entry in enumerate(subtitles):
+        # Build the window: up to KARAOKE_WINDOW words centered around current
+        half = KARAOKE_WINDOW // 2
+        win_start = max(0, i - half)
+        win_end   = min(total, win_start + KARAOKE_WINDOW)
+        # Adjust window start if we're near the end
+        win_start = max(0, win_end - KARAOKE_WINDOW)
 
-        start  = sub["start"]
-        end    = sub["end"]
-        duration = end - start
+        window = subtitles[win_start:win_end]
+        # Index of current word within the window
+        cur_in_win = i - win_start
 
-        # Distribute time proportionally by character count
-        char_counts   = [max(len(w), 1) for w in words]
-        total_chars   = sum(char_counts)
-        word_durations = [(c / total_chars) * duration for c in char_counts]
+        phrase_parts = []
+        for j, w in enumerate(window):
+            word = w["text"]
+            if j < cur_in_win:
+                phrase_parts.append(f"{{\\c{COLOR_SPOKEN}}}{word}")
+            elif j == cur_in_win:
+                phrase_parts.append(f"{{\\c{COLOR_CURRENT}}}{word}")
+            else:
+                phrase_parts.append(f"{{\\c{COLOR_UPCOMING}}}{word}")
 
-        # Build ASS karaoke text
-        # \\k<N> = karaoke tag, N = centiseconds for this syllable
-        # \\c&HCOLOR& = primary color override for following text
-        # We color each word individually:
-        #   before highlight: COLOR_SPOKEN via \\c
-        #   at highlight:     COLOR_CURRENT via \\c  (\\k advances the highlight)
-        #   after highlight:  COLOR_UPCOMING (default style color)
-        #
-        # ASS karaoke works by advancing through \\k tags sequentially.
-        # We use \\kf (fill) for a smooth highlight sweep per word.
-
-        text_parts = []
-        for i, (word, dur) in enumerate(zip(words, word_durations)):
-            k_cs = max(1, int(round(dur * 100)))  # centiseconds
-            # \\kf<N> advances the highlight; color before = spoken, during = current
-            text_parts.append(
-                f"{{\\kf{k_cs}\\c{COLOR_CURRENT}}}{word}"
-            )
-
-        # Join with spaces; reset color to upcoming after each word via \\c
-        # Actually with \\kf the color transitions automatically via SecondaryColour→PrimaryColour
-        # But we want: spoken=white, current=yellow, upcoming=gray
-        # The cleanest way: use \\1c (primary) and \\2c (secondary/karaoke fill)
-        # PrimaryColour = upcoming (gray), SecondaryColour = current (yellow)
-        # Before \\k fires: text shows in PrimaryColour (gray/upcoming)
-        # While \\kf fires: text fills from SecondaryColour (yellow) → PrimaryColour
-        # After \\k: text stays PrimaryColour (gray) — but we want white for spoken
-        #
-        # To get spoken=white we need a different approach:
-        # Emit one Dialogue line per word, coloring the full phrase each time.
-
-        # --- Better approach: one Dialogue line per word window ---
-        # Each line shows the full phrase with correct colors for that moment.
-        # This is heavier in the ASS file but renders correctly.
-        word_start = start
-        for i, (word, dur) in enumerate(zip(words, word_durations)):
-            word_end = word_start + dur
-            phrase_parts = []
-            for j, w in enumerate(words):
-                if j < i:
-                    phrase_parts.append(f"{{\\c{COLOR_SPOKEN}}}{w}")
-                elif j == i:
-                    phrase_parts.append(f"{{\\c{COLOR_CURRENT}}}{w}")
-                else:
-                    phrase_parts.append(f"{{\\c{COLOR_UPCOMING}}}{w}")
-            text = " ".join(phrase_parts)
-            s_time = _seconds_to_ass_time(word_start)
-            e_time = _seconds_to_ass_time(word_end)
-            lines.append(
-                f"Dialogue: 0,{s_time},{e_time},Default,,0,0,0,,{text}"
-            )
-            word_start = word_end
+        text    = " ".join(phrase_parts)
+        s_time  = _seconds_to_ass_time(word_entry["start"])
+        e_time  = _seconds_to_ass_time(word_entry["end"])
+        lines.append(f"Dialogue: 0,{s_time},{e_time},Default,,0,0,0,,{text}")
 
     return ass_header + "\n".join(lines) + "\n"
 
