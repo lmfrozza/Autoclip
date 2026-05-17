@@ -21,3 +21,4 @@ with open(_CONFIG_PATH, "r", encoding="utf-8") as _f:
 
 streamers: list[str] = _config.get("streamers", [])
 pipeline: dict = _config.get("pipeline", {})
+watermark: dict = _config.get("watermark", {})

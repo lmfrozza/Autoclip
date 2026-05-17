@@ -7,3 +7,10 @@ streamers:
 pipeline:
   range_days: 1
   download_cap: 5
+
+watermark:
+  path: "assets/watermark.png"  # PNG with transparency (RGBA)
+  opacity: 0.8                  # 0.0 (invisible) to 1.0 (fully opaque)
+  position: "top-right"         # top-right | top-left | bottom-right | bottom-left
+  scale: 0.15                   # fraction of video width (0.15 = 15% of 1080px = ~162px wide)
+  margin: 40                    # pixels from the edge

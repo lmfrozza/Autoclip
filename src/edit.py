@@ -3,7 +3,7 @@ import re
 import subprocess
 import tempfile
 from multiprocessing import Pool, cpu_count
-from config import logger
+from config import logger, watermark
 import imageio_ffmpeg
 
 FFMPEG = imageio_ffmpeg.get_ffmpeg_exe()
@@ -201,10 +201,6 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     return ass_header + "\n".join(lines) + "\n"
 
 
-# ---------------------------------------------------------------------------
-# Per-clip processing (runs in worker process)
-# ---------------------------------------------------------------------------
-
 def _process_clip(args: tuple) -> None:
     video_path, srt_path, output_path, encoder = args
 
@@ -224,23 +220,72 @@ def _process_clip(args: tuple) -> None:
             with open(ass_path, "w", encoding="utf-8") as f:
                 f.write(ass_content)
 
-        # --- Build FFmpeg filter chain ---
-        # 1. Scale to fit width=1080, keep aspect ratio
-        # 2. Pad to 1080x1920 with black bars (center vertically)
-        # 3. Burn in ASS subtitles (if available)
-        scale_filter = (
+        # --- Watermark config ---
+        wm_path    = watermark.get("path", "")
+        wm_exists  = bool(wm_path and os.path.exists(wm_path))
+        wm_w       = int(REELS_W * float(watermark.get("scale", 0.15)))
+        opacity    = float(watermark.get("opacity", 0.8))
+        position   = watermark.get("position", "top-right")
+        margin     = int(watermark.get("margin", 40))
+
+        if position == "top-right":
+            ox, oy = f"W-w-{margin}", str(margin)
+        elif position == "top-left":
+            ox, oy = str(margin), str(margin)
+        elif position == "bottom-right":
+            ox, oy = f"W-w-{margin}", f"H-h-{margin}"
+        else:  # bottom-left
+            ox, oy = str(margin), f"H-h-{margin}"
+
+        # --- Subtitle filter string ---
+        subs_filter = None
+        if ass_path:
+            escaped = ass_path.replace("\\", "/").replace(":", "\\:")
+            subs_filter = f"subtitles='{escaped}'"
+
+        scale_pad = (
             f"scale={REELS_W}:-2,"
             f"pad={REELS_W}:{REELS_H}:(ow-iw)/2:(oh-ih)/2:black"
         )
 
-        if ass_path:
-            # Escape path for FFmpeg filter (colons and backslashes)
-            escaped = ass_path.replace("\\", "/").replace(":", "\\:")
-            vf = f"{scale_filter},subtitles='{escaped}'"
-        else:
-            vf = scale_filter
+        # --- Build FFmpeg command ---
+        # With watermark: must use -filter_complex (two inputs)
+        # Without watermark: simpler -vf chain
+        if wm_exists:
+            # [0:v] → scale+pad → [base]
+            # [1:v] → scale+opacity → [wm]
+            # [base][wm] → overlay → [out]
+            # [out] → subtitles (optional) → [final]
+            fc = (
+                f"[0:v]{scale_pad}[base];"
+                f"[1:v]scale={wm_w}:-1,format=rgba,colorchannelmixer=aa={opacity:.2f}[wm];"
+                f"[base][wm]overlay={ox}:{oy}[out]"
+            )
+            if subs_filter:
+                fc += f";[out]{subs_filter}[final]"
+                map_v = "[final]"
+            else:
+                map_v = "[out]"
 
-        # --- Encoder-specific options ---
+            cmd = [
+                FFMPEG, "-y",
+                "-i", video_path,
+                "-i", wm_path,
+                "-filter_complex", fc,
+                "-map", map_v,
+                "-map", "0:a",
+            ]
+        else:
+            vf = scale_pad
+            if subs_filter:
+                vf += f",{subs_filter}"
+            cmd = [
+                FFMPEG, "-y",
+                "-i", video_path,
+                "-vf", vf,
+            ]
+
+        # --- Encoder options ---
         if encoder == "libx264":
             enc_opts = ["-c:v", "libx264", "-preset", "fast", "-crf", "23"]
         elif encoder == "h264_nvenc":
@@ -252,17 +297,14 @@ def _process_clip(args: tuple) -> None:
         else:
             enc_opts = ["-c:v", "libx264", "-preset", "fast", "-crf", "23"]
 
-        cmd = [
-            FFMPEG, "-y",
-            "-i", video_path,
-            "-vf", vf,
+        cmd += [
             *enc_opts,
             "-c:a", "aac", "-b:a", "192k",
             "-movflags", "+faststart",
             output_path,
         ]
 
-        logger.info(f"[{clip_name}] Running FFmpeg...")
+        logger.info(f"[{clip_name}] Running FFmpeg (watermark={'yes' if wm_exists else 'no'})...")
         result = subprocess.run(cmd, capture_output=True, text=True)
 
         if result.returncode != 0:
